@@ -1,5 +1,6 @@
 // src/components/ui/Navbar.tsx
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function Navbar() {
   // This array makes scaling easy. Just add new objects here later!
@@ -12,8 +13,18 @@ export default function Navbar() {
       <div className="mx-auto flex max-w-6xl items-center justify-between">
 
         {/* Brand / Logo Area */}
-        <Link href="/" className="text-xl font-bold tracking-tight text-neutral-600">
-          CourseGen
+        <Link href="/" className="flex items-center gap-3 transition-opacity hover:opacity-80">
+          <Image 
+            src="/srijan-logo.png" 
+            alt="Srijan TechWorks Logo"
+            width={50} 
+            height={50} 
+            // rounded-full perfectly clips the black square background into a circle
+            className="rounded-full shadow-sm" 
+          />
+          <span className="text-3xl font-bold tracking-tight text-neutral-600">
+            Srijan
+          </span>
         </Link>
 
         {/* Navigation Links */}
