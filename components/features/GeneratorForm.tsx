@@ -2,7 +2,7 @@
 "use client";
 
 import { useState } from 'react';
-import { LinkIcon, Sparkles, SlidersHorizontal, Info, X } from 'lucide-react';
+import { LinkIcon, Sparkles, SlidersHorizontal, Info, X, Loader2 } from 'lucide-react';
 import { DROPDOWN_OPTIONS } from '@/lib/constants';
 import CustomSelect from '../ui/CustomSelect';
 
@@ -10,9 +10,10 @@ export default function GeneratorForm() {
     const [url, setUrl] = useState('');
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
-
-    // New state to control the confirmation modal
     const [showModal, setShowModal] = useState(false);
+
+    const [isLoading, setIsLoading] = useState(false);
+    const [apiResult, setApiResult] = useState<any>(null);
 
     const [selections, setSelections] = useState({
         audience: 'none',
@@ -31,13 +32,11 @@ export default function GeneratorForm() {
         }
     };
 
-    const isButtonDisabled = url.trim() === '' || !isValidUrl(url);
-
-    // Dynamic check: returns true if AT LEAST ONE option is not 'none'
+    const isButtonDisabled = url.trim() === '' || !isValidUrl(url) || isLoading;
     const hasSelectedOptions = Object.values(selections).some(val => val !== 'none');
 
     const handleToggleOptions = () => {
-        if (isButtonDisabled) {
+        if (isButtonDisabled && !isLoading) {
             setErrorMsg('Please enter a valid course URL to access options.');
             return;
         }
@@ -58,45 +57,86 @@ export default function GeneratorForm() {
         setSelections((prev) => ({ ...prev, [key]: value }));
     };
 
-    // The actual generation logic extracted into its own function
-    const proceedWithGeneration = () => {
-        setShowModal(false); // Ensure modal is closed
+    // ==========================================
+    // REFACTORED: Bulletproof Fetch Logic
+    // ==========================================
+    const executeFetch = async (targetUrl: string, currentSelections: any, useSelections: boolean) => {
+        setShowModal(false);
+        setIsLoading(true); 
+        setErrorMsg(''); 
+        setApiResult(null); 
 
         const payload = {
-            url,
-            // If they skipped options, we don't send the selections object at all
-            ...(hasSelectedOptions ? selections : {})
+            url: targetUrl,
+            ...(useSelections ? currentSelections : {})
         };
 
-        console.log("Sending to Backend:", payload);
-        // FUTURE: Trigger your loading state and API call here
-    };
+        console.log(">> [DEBUG] Starting Fetch. Payload:", payload);
 
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            const response = await fetch('/api/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId); 
+
+            console.log(">> [DEBUG] Response Status:", response.status);
+
+            const data = await response.json();
+            console.log(">> [DEBUG] Response Data:", data);
+
+            if (!response.ok) {
+                setErrorMsg(data.error || "An error occurred while validating the course link.");
+            } else {
+                // SUCCESS STATE
+                setApiResult({
+                    eventId: data.eventId,
+                    ...data.courseContext
+                });
+                
+                // NEW: Auto-collapse the advanced options so the result is immediately visible!
+                setShowAdvanced(false);
+            }
+        } catch (err: any) {
+            console.error(">> [DEBUG] Fetch Error:", err);
+            
+            if (err.name === 'AbortError') {
+                setErrorMsg("Request timed out. The server took too long to respond.");
+            } else {
+                setErrorMsg("Network error. Please check your connection and try again.");
+            }
+        } finally {
+            console.log(">> [DEBUG] Shutting off loading spinner.");
+            setIsLoading(false); 
+        }
+    };
     const handleGenerate = (e: React.FormEvent) => {
         e.preventDefault();
 
         if (isButtonDisabled) {
-            setErrorMsg('Please enter a valid course URL to create a message.');
+            if (!isLoading) setErrorMsg('Please enter a valid course URL to create a message.');
             return;
         }
 
-        // Logic check: If nothing custom is selected, show the warning modal.
-        // Otherwise, skip the modal and generate immediately.
         if (!hasSelectedOptions) {
             setShowModal(true);
         } else {
-            proceedWithGeneration();
+            // Explicitly pass the current state to prevent stale closures
+            executeFetch(url, selections, true);
         }
     };
 
     return (
         <>
-            <form onSubmit={handleGenerate} noValidate className="w-full max-w-full mx-auto flex flex-col items-center animate-in fade-in
-       slide-in-from-bottom-4 duration-700 mt-5 pb-32">
+            <form onSubmit={handleGenerate} noValidate className="w-full max-w-full mx-auto flex flex-col items-center animate-in fade-in slide-in-from-bottom-4 duration-700 mt-5 pb-10">
 
-                {/* Top Row: URL Box and Options Toggle */}
                 <div className="flex flex-col lg:flex-row gap-4 w-full items-start">
-
                     <div className="flex flex-col flex-grow w-full gap-2">
                         <div className="relative flex items-center w-full">
                             <div className="absolute left-4 text-neutral-400 pointer-events-none">
@@ -105,13 +145,13 @@ export default function GeneratorForm() {
                             <input
                                 type="url"
                                 value={url}
+                                disabled={isLoading} 
                                 onChange={(e) => {
                                     setUrl(e.target.value);
                                     if (errorMsg) setErrorMsg('');
                                 }}
                                 placeholder="Paste your Art of Living course link here (e.g., https://...)"
-                                className="w-full bg-white border border-neutral-300 text-neutral-900 text-base md:text-lg rounded-2xl py-4 pl-12 pr-6
-       placeholder:text-neutral-400 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-200 transition-all shadow-sm"
+                                className="w-full bg-white border border-neutral-300 text-neutral-900 text-base md:text-lg rounded-2xl py-4 pl-12 pr-6 placeholder:text-neutral-400 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-200 transition-all shadow-sm disabled:bg-neutral-50 disabled:text-neutral-500"
                             />
                         </div>
 
@@ -127,13 +167,16 @@ export default function GeneratorForm() {
                         <button
                             type="button"
                             onClick={handleToggleOptions}
-                            className={`flex-1 lg:flex-none flex items-center justify-center gap-2 border font-medium rounded-2xl px-6 py-4
-       transition-colors ${isButtonDisabled
+                            disabled={isLoading}
+                            className={`flex-1 lg:flex-none flex items-center justify-center gap-2 border font-medium rounded-2xl px-6 py-4 transition-colors ${
+                                isButtonDisabled && !isLoading
                                     ? 'opacity-50 cursor-not-allowed bg-white border-neutral-300 text-neutral-700'
-                                    : showAdvanced
-                                        ? 'bg-amber-100 border-amber-300 text-amber-900 cursor-pointer hover:bg-amber-200'
-                                        : 'bg-white border-neutral-300 text-neutral-700 hover:bg-amber-200 cursor-pointer'
-                                }`}
+                                    : isLoading
+                                        ? 'opacity-50 cursor-not-allowed bg-white border-neutral-300 text-neutral-400'
+                                        : showAdvanced
+                                            ? 'bg-amber-100 border-amber-300 text-amber-900 cursor-pointer hover:bg-amber-200'
+                                            : 'bg-white border-neutral-300 text-neutral-700 hover:bg-amber-200 cursor-pointer'
+                            }`}
                         >
                             {showAdvanced ? (
                                 <>
@@ -148,27 +191,34 @@ export default function GeneratorForm() {
                             )}
                         </button>
 
-                        {/* Render "Create Message" here ONLY when options are NOT toggled */}
                         {!showAdvanced && (
                             <button
                                 type="submit"
-                                className={`flex-1 lg:flex-none flex items-center justify-center gap-2 font-semibold rounded-2xl px-8 py-4
-       transition-colors shadow-md ${isButtonDisabled
+                                disabled={isButtonDisabled}
+                                className={`flex-1 lg:flex-none flex items-center justify-center gap-2 font-semibold rounded-2xl px-8 py-4 transition-colors shadow-md min-w-[200px] ${
+                                    isButtonDisabled
                                         ? 'opacity-50 cursor-not-allowed bg-amber-500 text-white'
                                         : 'bg-amber-500 text-white hover:bg-amber-600 cursor-pointer'
-                                    }`}
+                                }`}
                             >
-                                <Sparkles className="h-5 w-5 shrink-0 text-amber-50" />
-                                Create Message
+                                {isLoading ? (
+                                    <>
+                                        <Loader2 className="h-5 w-5 animate-spin text-amber-50" />
+                                        Fetching...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Sparkles className="h-5 w-5 shrink-0 text-amber-50" />
+                                        Create Message
+                                    </>
+                                )}
                             </button>
                         )}
                     </div>
                 </div>
 
-                {/* Options Panel */}
                 {showAdvanced && (
-                    <div className="w-full mt-8 bg-white/80 border border-neutral-200 rounded-2xl p-6 md:p-8 animate-in fade-in slide-in-from-top-4
-       duration-300 shadow-sm backdrop-blur-sm">
+                    <div className="w-full mt-8 bg-white/80 border border-neutral-200 rounded-2xl p-6 md:p-8 animate-in fade-in slide-in-from-top-4 duration-300 shadow-sm backdrop-blur-sm">
                         <div className="text-left mb-6">
                             <h2 className="text-xl font-bold text-neutral-900">Tailor Your Message</h2>
                             <p className="text-sm text-neutral-600 mt-1">Fine-tune the AI's context. Leave as "None" for default generation.</p>
@@ -177,70 +227,65 @@ export default function GeneratorForm() {
                                 <Info className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
                                 <p className="text-sm text-amber-900">
                                     <span className="font-bold text-amber-950">Note: </span>
-                                    If you close this options panel, your selections will be reset to "None". Keep the panel open while clicking "Create
-                                    Message" to apply these settings.
+                                    If you close this options panel, your selections will be reset to "None". Keep the panel open while clicking "Create Message" to apply these settings.
                                 </p>
                             </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 text-left">
-                            <CustomSelect
-                                label="Target Audience"
-                                options={DROPDOWN_OPTIONS.audiences}
-                                value={selections.audience}
-                                onChange={(val) => handleSelectChange('audience', val)}
-                            />
-                            <CustomSelect
-                                label="Message Tone"
-                                options={DROPDOWN_OPTIONS.tones}
-                                value={selections.tone}
-                                onChange={(val) => handleSelectChange('tone', val)}
-                            />
-                            <CustomSelect
-                                label="Message Length"
-                                options={DROPDOWN_OPTIONS.lengths}
-                                value={selections.length}
-                                onChange={(val) => handleSelectChange('length', val)}
-                            />
-                            <CustomSelect
-                                label="Core Benefit Focus"
-                                options={DROPDOWN_OPTIONS.benefits}
-                                value={selections.benefit}
-                                onChange={(val) => handleSelectChange('benefit', val)}
-                            />
-                            <CustomSelect
-                                label="Emoji Level"
-                                options={DROPDOWN_OPTIONS.emojis}
-                                value={selections.emoji}
-                                onChange={(val) => handleSelectChange('emoji', val)}
-                            />
+                            <CustomSelect label="Target Audience" options={DROPDOWN_OPTIONS.audiences} value={selections.audience} onChange={(val) => handleSelectChange('audience', val)} />
+                            <CustomSelect label="Message Tone" options={DROPDOWN_OPTIONS.tones} value={selections.tone} onChange={(val) => handleSelectChange('tone', val)} />
+                            <CustomSelect label="Message Length" options={DROPDOWN_OPTIONS.lengths} value={selections.length} onChange={(val) => handleSelectChange('length', val)} />
+                            <CustomSelect label="Core Benefit Focus" options={DROPDOWN_OPTIONS.benefits} value={selections.benefit} onChange={(val) => handleSelectChange('benefit', val)} />
+                            <CustomSelect label="Emoji Level" options={DROPDOWN_OPTIONS.emojis} value={selections.emoji} onChange={(val) => handleSelectChange('emoji', val)} />
                         </div>
 
-                        {/* New "Create Message" Position: Exactly below the Custom Select container, center-aligned */}
                         <div className="mt-10 flex justify-center">
                             <button
                                 type="submit"
-                                className={`w-full sm:w-auto flex items-center justify-center gap-2 font-semibold rounded-2xl px-12 py-4
-       transition-colors shadow-md ${isButtonDisabled
+                                disabled={isButtonDisabled}
+                                className={`w-full sm:w-auto flex items-center justify-center gap-2 font-semibold rounded-2xl px-12 py-4 transition-colors shadow-md min-w-[250px] ${
+                                    isButtonDisabled
                                         ? 'opacity-50 cursor-not-allowed bg-amber-500 text-white'
                                         : 'bg-amber-500 text-white hover:bg-amber-600 cursor-pointer'
-                                    }`}
+                                }`}
                             >
-                                <Sparkles className="h-5 w-5 shrink-0 text-amber-50" />
-                                Create Message
+                                {isLoading ? (
+                                    <>
+                                        <Loader2 className="h-5 w-5 animate-spin text-amber-50" />
+                                        Fetching Details...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Sparkles className="h-5 w-5 shrink-0 text-amber-50" />
+                                        Create Message
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
                 )}
             </form>
 
-            {/* Confirmation Modal Overlay */}
+            {apiResult && (
+                <div className="w-full max-w-full mx-auto mb-32 animate-in fade-in slide-in-from-bottom-4">
+                    <div className="bg-white border border-green-200 rounded-2xl p-6 md:p-8 shadow-sm">
+                        <div className="flex items-center gap-2 mb-4">
+                            <div className="h-3 w-3 bg-green-500 rounded-full animate-pulse"></div>
+                            <h3 className="text-lg font-bold text-neutral-900">Successfully Extracted Course Data</h3>
+                        </div>
+                        <p className="text-sm text-neutral-600 mb-4">This is the structured data that will be fed to the AI to generate your message.</p>
+
+                        <pre className="bg-neutral-50 p-4 rounded-xl text-sm text-neutral-800 overflow-x-auto border border-neutral-200 shadow-inner">
+                            <code>{JSON.stringify(apiResult, null, 2)}</code>
+                        </pre>
+                    </div>
+                </div>
+            )}
+
             {showModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-neutral-900/40 backdrop-blur-sm animate-in fade-in duration-200 p-4">
-                    {/* Added 'relative' to the card container */}
                     <div className="relative bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 md:p-8 animate-in zoom-in-95 duration-200">
-
-                        {/* New Top-Right Close Button */}
                         <button
                             type="button"
                             onClick={() => setShowModal(false)}
@@ -269,9 +314,10 @@ export default function GeneratorForm() {
                                 Review Options
                             </button>
 
+                            {/* UPDATED: Pass false explicitly to ignore the empty options */}
                             <button
                                 type="button"
-                                onClick={proceedWithGeneration}
+                                onClick={() => executeFetch(url, selections, false)}
                                 className="px-6 py-3 rounded-xl font-medium text-white bg-amber-500 hover:bg-amber-600 transition-colors flex items-center justify-center gap-2 shadow-sm w-full sm:w-auto cursor-pointer"
                             >
                                 <Sparkles className="h-4 w-4" />
