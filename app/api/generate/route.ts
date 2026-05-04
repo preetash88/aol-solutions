@@ -43,7 +43,13 @@ export async function POST(request: Request) {
         // ==========================================
         // 2. Fetch Data from AOL API
         // ==========================================
-        const AOL_API_URL = `https://www.artofliving.online/api.php?action=getCrsDts&api_key=f3444b53911b0fb2ff216d2b633d66387f685d2a`
+        // Load the API Key from the environment variables
+        const apiURL = process.env.AOL_API_URL;
+        
+        if (!apiURL) {
+            console.error("CRITICAL: AOL_API_KEY is missing from environment variables.");
+            return NextResponse.json({ error: 'Server configuration error.' }, { status: 500 });
+        }
 
         const params = new URLSearchParams();
         params.append("event_id", eventId);
@@ -54,7 +60,7 @@ export async function POST(request: Request) {
 
         console.log(`Fetching details for Event ID: ${eventId} from AOL API...`);
 
-        const apiResponse = await fetch(AOL_API_URL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", 'Accept': 'application/json, text/javascript, */*; q=0.01' }, body: params.toString() });
+        const apiResponse = await fetch(apiURL, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", 'Accept': 'application/json, text/javascript, */*; q=0.01' }, body: params.toString() });
 
 
         if (!apiResponse.ok) {
